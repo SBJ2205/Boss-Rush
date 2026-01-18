@@ -73,6 +73,7 @@ public class BossController : MonoBehaviour
                 playerHealth.TakeDamage(1); // Deal 1 damage
                 
                 // Optional: Knock the player back slightly here (Advanced)
+                
             }
         }
     }

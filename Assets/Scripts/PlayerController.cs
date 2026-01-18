@@ -4,10 +4,10 @@ public class PlayerController : MonoBehaviour
 {
     // --- SETTINGS ---
     [Header("Form Stats")]
-    public float swordSpeed = 8f;   // Consistent speed for Sword
+    public float swordSpeed = 8f;
     public float swordJump = 12f;
     
-    public float tankSpeed = 4f;    // Consistent speed for Tank
+    public float tankSpeed = 4f;
     public float tankJump = 5f;
 
     // --- ASSIGN IN INSPECTOR ---
@@ -18,64 +18,59 @@ public class PlayerController : MonoBehaviour
     // --- PRIVATE VARIABLES ---
     private Rigidbody2D currentRb; 
     private bool isSwordActive = true; 
+    private float knockbackTimer = 0f; // <--- NEW VARIABLE
     
-    // We store the current stats in these temporary variables
-    private float currentSpeed;
-    private float currentJump;
-
-    // Add a reference to the health script at the top of the class
+    // Add a reference to the health script
     private Health myHealth;
 
     void Start()
     {
-        // 1. SETUP INITIAL STATE (SWORD)
+        // 1. SETUP INITIAL STATE
         swordForm.SetActive(true);
         tankForm.SetActive(false);
-        
         currentRb = swordForm.GetComponent<Rigidbody2D>();
-        
-        // 2. APPLY SWORD STATS IMMEDIATELY
-        currentSpeed = swordSpeed;
-        currentJump = swordJump;
-
-        // Grab the health script from the same object
         myHealth = GetComponent<Health>();
     }
 
-    
+    // --- NEW FUNCTION: CALLED BY ATTACK SCRIPT ---
+    public void ApplyKnockback(Vector2 force, float duration)
+    {
+        // 1. Set the timer so inputs are ignored
+        knockbackTimer = duration;
+
+        // 2. Apply the force instantly
+        currentRb.linearVelocity = force;
+    }
 
     void Update()
     {
+        // --- 0. CHECK KNOCKBACK (NEW) ---
+        // If we are being knocked back, count down and SKIP movement code
+        if (knockbackTimer > 0)
+        {
+            knockbackTimer -= Time.deltaTime;
+            return; // STOP HERE. Do not let inputs overwrite velocity.
+        }
+
         // 1. DETERMINE STATS
         float activeSpeed = isSwordActive ? swordSpeed : tankSpeed;
         float activeJump = isSwordActive ? swordJump : tankJump;
 
-        // 2. CHECK BLOCKING (Only for Tank!)
-        // If we are NOT sword (meaning we are Tank) AND holding K
+        // 2. CHECK BLOCKING (Tank only)
         if (!isSwordActive && Input.GetKey(KeyCode.K))
         {
             myHealth.isBlocking = true;
-            
-            // FREEZE MOVEMENT WHILE BLOCKING
-            // We set velocity to (0, current Y) so you stop sliding but still fall if in air
             currentRb.linearVelocity = new Vector2(0, currentRb.linearVelocity.y);
-            
-            // Visual feedback: Turn the Tank slightly Darker Blue
             tankForm.GetComponent<SpriteRenderer>().color = Color.cyan;
-            
-            return; // STOP HERE! Don't run movement code below.
+            return; 
         }
         else
         {
-            // Stop blocking
             if(myHealth != null) myHealth.isBlocking = false;
-            
-            // Reset Color (Optional fix to make sure he turns back to blue)
             if(!isSwordActive) tankForm.GetComponent<SpriteRenderer>().color = Color.blue; 
         }
 
         // 3. INPUTS & SWITCHING
-        // Only allow switching if NOT blocking
         if (Input.GetKeyDown(KeyCode.Q))
         {
             SwitchForm();
@@ -84,6 +79,12 @@ public class PlayerController : MonoBehaviour
         // 4. MOVEMENT
         float moveInput = Input.GetAxisRaw("Horizontal");
         currentRb.linearVelocity = new Vector2(moveInput * activeSpeed, currentRb.linearVelocity.y);
+
+        if (moveInput != 0)
+        {
+            // Flip the player so the Attack Script knows we are looking Left
+            currentRb.transform.localScale = new Vector3(moveInput, 1, 1);
+        }
 
         // 5. JUMPING
         if (Input.GetButtonDown("Jump") && Mathf.Abs(currentRb.linearVelocity.y) < 0.01f)
@@ -94,44 +95,25 @@ public class PlayerController : MonoBehaviour
 
     void SwitchForm()
     {
-        // Save position
         Vector3 currentPos = currentRb.transform.position;
-        // Save current vertical velocity (falling speed) so you don't stop falling mid-air
         Vector2 savedVelocity = currentRb.linearVelocity;
 
         if (isSwordActive)
         {
-            // Switch to TANK
             swordForm.SetActive(false);
             tankForm.SetActive(true);
-            
             tankForm.transform.position = currentPos; 
             currentRb = tankForm.GetComponent<Rigidbody2D>(); 
-            
-            // Transfer velocity so movement is smooth
-            currentRb.linearVelocity = savedVelocity;
-
-            // Update Stats
-            currentSpeed = tankSpeed;
-            currentJump = tankJump;
         }
         else
         {
-            // Switch to SWORD
             tankForm.SetActive(false);
             swordForm.SetActive(true);
-            
             swordForm.transform.position = currentPos;
             currentRb = swordForm.GetComponent<Rigidbody2D>();
-
-            // Transfer velocity
-            currentRb.linearVelocity = savedVelocity;
-
-            // Update Stats
-            currentSpeed = swordSpeed;
-            currentJump = swordJump;
         }
 
+        currentRb.linearVelocity = savedVelocity;
         isSwordActive = !isSwordActive;
     }
 }
