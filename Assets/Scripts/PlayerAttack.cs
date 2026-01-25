@@ -87,6 +87,8 @@ public class PlayerAttack : MonoBehaviour
             if (enemyHealth != null)
             {
                 enemyHealth.TakeDamage(attackDamage);
+                // 0.05f is a standard "crunchy" hit. Use 0.1f for heavy attacks.
+                if (HitStop.Instance != null) HitStop.Instance.Stop(0.05f);
             }
         }
         

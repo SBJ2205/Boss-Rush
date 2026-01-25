@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 
 public class PlayerController : MonoBehaviour
 {
@@ -15,6 +16,10 @@ public class PlayerController : MonoBehaviour
     public GameObject swordForm; 
     public GameObject tankForm; 
 
+
+    [Header("Camera Link")]
+    public CameraFollow gameCamera; // <--- DRAG MAIN CAMERA HERE
+
     // --- PRIVATE VARIABLES ---
     private Rigidbody2D currentRb; 
     private bool isSwordActive = true; 
@@ -30,6 +35,9 @@ public class PlayerController : MonoBehaviour
         tankForm.SetActive(false);
         currentRb = swordForm.GetComponent<Rigidbody2D>();
         myHealth = GetComponent<Health>();
+
+        // 1. TELL CAMERA TO FOLLOW SWORD INITIALLY
+        UpdateCameraTarget();
     }
 
     // --- NEW FUNCTION: CALLED BY ATTACK SCRIPT ---
@@ -44,6 +52,9 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
+        // Check if boss has frozen the player
+        if (BossController.IsPlayerFrozen) return;
+
         // --- 0. CHECK KNOCKBACK (NEW) ---
         // If we are being knocked back, count down and SKIP movement code
         if (knockbackTimer > 0)
@@ -115,5 +126,18 @@ public class PlayerController : MonoBehaviour
 
         currentRb.linearVelocity = savedVelocity;
         isSwordActive = !isSwordActive;
+
+        // 2. TELL CAMERA TO SWITCH TARGETS
+        UpdateCameraTarget();
+    }
+
+
+    // Helper function to update the camera
+    void UpdateCameraTarget()
+    {
+        if (gameCamera != null)
+        {
+            gameCamera.target = currentRb.transform;
+        }
     }
 }
