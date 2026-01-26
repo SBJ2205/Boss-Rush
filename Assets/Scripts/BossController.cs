@@ -3,36 +3,79 @@ using System.Collections;
 
 public class BossController : MonoBehaviour
 {
+    #region Inspector Variables
+    
     [Header("Boss Stats")]
     public int maxHealth = 100;
     public float moveSpeed = 3f;
     public float attackRange = 2f;
     
     [Header("Phase Thresholds")]
-    public float phase2HealthPercent = 0.66f; // 66% HP
-    public float phase3HealthPercent = 0.33f; // 33% HP
+    public float phase2HealthPercent = 0.66f;
+    public float phase3HealthPercent = 0.33f;
     
     [Header("Phase Speed Multipliers")]
     public float phase1SpeedMultiplier = 1f;
     public float phase2SpeedMultiplier = 1.3f;
     public float phase3SpeedMultiplier = 1.6f;
     
-    [Header("Attack Settings")]
-    public float jumpForce = 15f;   
+    [Header("Projectile Settings")]
     public GameObject projectilePrefab;
     public Transform projectileSpawnPoint;
-    public float chargeSpeed = 15f;
-    public float chargeDuration = 0.5f;
     public float projectileSpeed = 8f;
     public int multiProjectileCount = 5;
     public float projectileSpreadAngle = 45f;
+    public float jumpForce = 15f;
     
-    [Header("Cooldowns")]
-    public float chargeCooldown = 3f;
-    public float projectileCooldown = 4f;
-    public float dodgeCooldown = 2f;
+    [Header("Lunge Attack")]
+    public float lungeCooldown = 4f;
+    public float lungeSpeed = 12f;
+    public float lungeDuration = 0.4f;
+    public float lungeTelegraphTime = 0.3f;
+    
+    [Header("Charge Attack")]
+    public float chargeCooldown = 5f;
+    public float chargeSpeed = 15f;
+    public float chargeDuration = 0.5f;
+    
+    [Header("Ground Slam Attack")]
+    public float slamCooldown = 6f;
+    public float slamJumpHeight = 8f;
+    public float shockwaveRange = 5f;
+    public GameObject shockwaveEffect;
+    
+    [Header("Tail Swipe Attack")]
+    public float swipeRange = 2.5f;
+    public float swipeKnockback = 5f;
+    public GameObject swipeEffect;
+    
+    [Header("Roar Attack")]
+    public float roarCooldown = 10f;
+    public float roarStunRange = 6f;
+    public float roarStunDuration = 1.5f;
+    
+    [Header("Predictive Shot")]
+    public float predictiveShotCooldown = 5f;
+    public float predictiveProjectileSpeed = 12f;
+    public float predictionTime = 0.5f;
+    
+    [Header("Vertical Rain Attack")]
+    public float projectileCooldown = 7f;
+    public int minRainCount = 5;
+    public int maxRainCount = 9;
+    public float rainSpawnHeight = 5f;
+    public float rainSpread = 8f;
+
+    [Header("Circular Projectile Attack")]
+    public float circularProjectileCooldown = 8f;
+    public int phase2CircularCount = 5;
+    public int phase3CircularCount = 8;
+    public float circularOrbitRadius = 2f;
+    public float circularOrbitDuration = 1.5f;
+    public float circularOrbitSpeed = 180f;
     
     [Header("Dodge Settings")]
+    public float dodgeCooldown = 2f;
     public float dodgeDistance = 3f;
     public float dodgeSpeed = 10f;
     
@@ -41,37 +84,123 @@ public class BossController : MonoBehaviour
     public float roarDuration = 3f;
     public float invulnerabilityDuration = 2f;
     
-    [Header("References")]
-    public BossMusicManager musicManager;
-    public SpriteRenderer spriteRenderer;
-    
     [Header("Aggro Settings")]
     public float aggroRange = 10f;
     public float transformationDuration = 3f;
-        
-    public static bool IsPlayerFrozen { get; private set; } = false;
 
-    // Private variables
+    [Header("Chase Mode Settings")]
+    public float chaseSpeedMultiplier = 1.5f;
+    public float chaseDistanceThreshold = 15f;
+    public float chaseTimeThreshold = 10f;
+    public float chaseDuration = 5f;
+
+    [Header("Combo Attack Settings")]
+    public float comboAttackCooldown = 12f; 
+    
+    [Header("References")]
+    public BossMusicManager musicManager;
+    public SpriteRenderer spriteRenderer;
+
+
+    
+    #endregion
+    
+    #region Private Variables
+    
+    // Static Properties
+    public static bool IsPlayerFrozen { get; private set; } = false;
+    
+    // Components
     private Rigidbody2D rb;
     private Transform playerTarget;
     private Health bossHealth;
+    private Color originalColor;
     
+    // State
     private int currentPhase = 1;
+    private bool hasAggro = false;
     private bool isInvulnerable = false;
     private bool isTransitioning = false;
-    private bool isCharging = false;
+    private bool isAttacking = false;
     private bool isDodging = false;
-    
+    private bool isChasingPlayer = false;
     private float currentSpeed;
+    
+    // Attack Timers
+    private float nextLungeTime = 0f;
     private float nextChargeTime = 0f;
+    private float nextSlamTime = 0f;
+    private float nextRoarTime = 0f;
+    private float nextPredictiveShotTime = 0f;
     private float nextProjectileTime = 0f;
     private float nextDodgeTime = 0f;
+    private float nextCircularProjectileTime = 0f;
+    private float nextComboTime = 0f;
+    private float timePlayerFar = 0f;
+
+    #endregion
     
-    private Color originalColor;
-
-    private bool hasAggro = false;
-
+    #region Unity Lifecycle
+    
     void Start()
+    {
+        InitializeComponents();
+        InitializeHealth();
+    }
+    
+    void Update()
+    {
+        if (!hasAggro)
+        {
+            CheckAggro();
+            return;
+        }
+        
+        if (isTransitioning) return;
+        
+        UpdatePlayerTarget();
+        
+        // Track player distance for chase mode (Phase 2+)
+        if (playerTarget != null && currentPhase >= 2)
+        {
+            float distance = Vector2.Distance(transform.position, playerTarget.position);
+            
+            if (distance > chaseDistanceThreshold)
+            {
+                timePlayerFar += Time.deltaTime;
+                
+                if (timePlayerFar > chaseTimeThreshold && !isChasingPlayer && !isAttacking)
+                {
+                    StartCoroutine(ChaseMode());
+                }
+            }
+            else
+            {
+                timePlayerFar = 0f;
+            }
+        }
+        
+        if (!isAttacking && !isDodging && !isChasingPlayer)
+        {
+            MoveAndFacePlayer();
+            DecideNextAction();
+        }
+    }
+    
+    void OnCollisionStay2D(Collision2D collision)
+    {
+        if (collision.gameObject.CompareTag("Player"))
+        {
+            TryDodge();
+            DealContactDamage(collision.gameObject);
+        }
+    }
+    
+    #endregion
+    
+    #region Initialization
+    
+    void InitializeComponents()
     {
         rb = GetComponent<Rigidbody2D>();
         bossHealth = GetComponent<Health>();
@@ -80,46 +209,34 @@ public class BossController : MonoBehaviour
             originalColor = spriteRenderer.color;
         
         currentSpeed = moveSpeed * phase1SpeedMultiplier;
-        
-        // Subscribe to health changes
+    }
+    
+    void InitializeHealth()
+    {
         if (bossHealth != null)
-            {
-                // Force the Health script to use OUR max health value
-                bossHealth.SetMaxHealth(maxHealth);
-                
-                // Subscribe to the event
-                bossHealth.OnHealthChanged += CheckPhaseTransition;
+        {
+            bossHealth.SetMaxHealth(maxHealth);
+            bossHealth.OnHealthChanged += CheckPhaseTransition;
         }
     }
-
-    void Update()
+    
+    #endregion
+    
+    #region Movement & Targeting
+    
+    void UpdatePlayerTarget()
     {
-        // If boss hasn't been triggered yet, check for aggro
-        if (!hasAggro)
-        {
-            CheckAggro();
-            return; // Don't do anything else while idle
-        }
-        
-        if (isTransitioning) return;
-        
-        // Find active player
         GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
-        
         if (playerObj != null)
         {
             playerTarget = playerObj.transform;
-            
-            if (!isCharging && !isDodging)
-            {
-                MoveAndFacePlayer();
-                DecideNextAction();
-            }
         }
     }
-
+    
     void MoveAndFacePlayer()
     {
+        if (playerTarget == null) return;
+        
         float distanceToPlayer = Vector2.Distance(transform.position, playerTarget.position);
         float direction = Mathf.Sign(playerTarget.position.x - transform.position.x);
 
@@ -132,33 +249,555 @@ public class BossController : MonoBehaviour
             rb.linearVelocity = new Vector2(0, rb.linearVelocity.y);
         }
 
-        // Flip sprite
-        transform.localScale = new Vector3(Mathf.Abs(transform.localScale.x) * direction, transform.localScale.y, 1);
+        FlipSprite(direction);
+    }
+    
+    void FlipSprite(float direction)
+    {
+        transform.localScale = new Vector3(
+            Mathf.Abs(transform.localScale.x) * direction, 
+            transform.localScale.y, 
+            1
+        );
     }
 
+    IEnumerator ChaseMode()
+    {
+        isChasingPlayer = true;
+        float elapsed = 0f;
+        
+        // Visual indicator - flash red
+        StartCoroutine(FlashColor(Color.red, chaseDuration));
+        
+        // Optional: Play angry sound effect
+        Debug.Log("Boss is chasing the player!");
+        
+        while (elapsed < chaseDuration)
+        {
+            if (playerTarget != null)
+            {
+                float distanceToPlayer = Vector2.Distance(transform.position, playerTarget.position);
+                
+                // Stop chasing if close enough
+                if (distanceToPlayer < 8f)
+                {
+                    Debug.Log("Boss caught up to player!");
+                    break;
+                }
+                
+                // Move toward player at increased speed
+                float direction = Mathf.Sign(playerTarget.position.x - transform.position.x);
+                rb.linearVelocity = new Vector2(direction * currentSpeed * chaseSpeedMultiplier, rb.linearVelocity.y);
+                
+                // Flip sprite
+                FlipSprite(direction);
+            }
+            
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+        
+        rb.linearVelocity = new Vector2(0, rb.linearVelocity.y);
+        isChasingPlayer = false;
+        timePlayerFar = 0f;
+    }
+    
+    #endregion
+    
+    #region Attack Decision System
+    
     void DecideNextAction()
     {
+        if (playerTarget == null) return;
+        
         float distanceToPlayer = Vector2.Distance(transform.position, playerTarget.position);
         
-        // Charge attack (close to medium range)
-        if (Time.time >= nextChargeTime && distanceToPlayer > attackRange && distanceToPlayer < 8f)
+        // Phase 1 Attack Priority System
+        
+        // 1. Roar - Occasional, teaches blocking (any range)
+        if (currentPhase == 1 && Time.time >= nextRoarTime && Random.value < 0.15f)
+        {
+            StartCoroutine(RoarAttack());
+            nextRoarTime = Time.time + roarCooldown;
+            return;
+        }
+        
+        // 2. Ground Slam - Close range, teaches jumping
+        if (Time.time >= nextSlamTime && distanceToPlayer >= 3f && distanceToPlayer <= 6f)
+        {
+            StartCoroutine(GroundSlamAttack());
+            nextSlamTime = Time.time + slamCooldown;
+            return;
+        }
+        
+        // 3. Lunge + Tail Swipe - Close-medium range, teaches spacing
+        if (Time.time >= nextLungeTime && distanceToPlayer >= 3f && distanceToPlayer <= 7f)
+        {
+            StartCoroutine(LungeAttack());
+            nextLungeTime = Time.time + lungeCooldown;
+            return;
+        }
+        
+        // 4. Predictive Shot - Medium range (Phase 1 only)
+        if (currentPhase == 1 && Time.time >= nextPredictiveShotTime && 
+            distanceToPlayer > 7f && distanceToPlayer <= 10f)
+        {
+            StartCoroutine(PredictiveShot());
+            nextPredictiveShotTime = Time.time + predictiveShotCooldown;
+            return;
+        }
+        
+        // 5. Vertical Rain - Far range, teaches blocking
+        if (Time.time >= nextProjectileTime && distanceToPlayer > 8f)
+        {
+            StartCoroutine(VerticalRainAttack());
+            nextProjectileTime = Time.time + projectileCooldown;
+            return;
+        }
+        
+        // 6. Charge - Medium range fallback
+        if (Time.time >= nextChargeTime && distanceToPlayer > 5f && distanceToPlayer < 10f)
         {
             StartCoroutine(ChargeAttack());
             nextChargeTime = Time.time + chargeCooldown;
+            return;
         }
-        // Projectile attack (medium to far range)
-        else if (Time.time >= nextProjectileTime && distanceToPlayer > 5f)
+
+        // Phase 2+ Additional Attacks
+        if (currentPhase >= 2)
         {
-            StartCoroutine(ProjectileAttack());
-            nextProjectileTime = Time.time + projectileCooldown;
+            // Combo Attack (occasional, medium range)
+            if (Time.time >= nextComboTime && distanceToPlayer > 4f && distanceToPlayer < 9f && Random.value < 0.25f)
+            {
+                StartCoroutine(ComboAttack_LungeSlamSwipe());
+                nextComboTime = Time.time + comboAttackCooldown;
+                return;
+            }
+            
+            // Circular Projectile Attack (far range)
+            if (Time.time >= nextCircularProjectileTime && distanceToPlayer > 10f)
+            {
+                StartCoroutine(CircularProjectileAttack());
+                nextCircularProjectileTime = Time.time + circularProjectileCooldown;
+                return;
+            }
         }
     }
+    
+    #endregion
+    
+    #region Attack Implementations
+    
+    IEnumerator LungeAttack()
+    {
+        isAttacking = true;
+        
+        // Telegraph - crouch down
+        Vector3 originalScale = transform.localScale;
+        transform.localScale = new Vector3(
+            originalScale.x, 
+            originalScale.y * 0.8f, 
+            originalScale.z
+        );
+        
+        yield return new WaitForSeconds(lungeTelegraphTime);
+        
+        // Execute lunge
+        Vector2 lungeDirection = (playerTarget.position - transform.position).normalized;
+        rb.linearVelocity = lungeDirection * lungeSpeed;
+        
+        // Restore scale
+        transform.localScale = originalScale;
+        
+        yield return new WaitForSeconds(lungeDuration);
+        
+        // Stop lunge
+        rb.linearVelocity = new Vector2(0, rb.linearVelocity.y);
+        
+        // Follow-up tail swipe if player is still close
+        if (currentPhase == 1)
+        {
+            float distanceToPlayer = Vector2.Distance(transform.position, playerTarget.position);
+            if (distanceToPlayer < 4f)
+            {
+                yield return new WaitForSeconds(0.2f);
+                yield return StartCoroutine(TailSwipe());
+            }
+        }
+        
+        isAttacking = false;
+    }
+    
+    IEnumerator TailSwipe()
+    {
+        // Brief windup
+        yield return new WaitForSeconds(0.15f);
+        
+        // Spawn visual effect
+        if (swipeEffect != null)
+        {
+            Vector2 swipePos = (Vector2)transform.position + 
+                new Vector2(Mathf.Sign(transform.localScale.x) * 1.5f, 0);
+            GameObject effect = Instantiate(swipeEffect, swipePos, Quaternion.identity);
+            effect.transform.localScale = new Vector3(Mathf.Sign(transform.localScale.x), 1, 1);
+            Destroy(effect, 0.3f);
+        }
+        
+        // Check for hit
+        Vector2 swipeCenter = (Vector2)transform.position + 
+            new Vector2(Mathf.Sign(transform.localScale.x) * 1.5f, 0);
+        Collider2D[] hits = Physics2D.OverlapCircleAll(swipeCenter, swipeRange);
+        
+        foreach (Collider2D hit in hits)
+        {
+            if (hit.CompareTag("Player"))
+            {
+                DamagePlayer(hit.gameObject, 1);
+                ApplyKnockback(hit.gameObject, swipeKnockback);
+                
+                if (HitStop.Instance != null) 
+                    HitStop.Instance.Stop(0.08f);
+            }
+        }
+        
+        yield return new WaitForSeconds(0.3f);
+    }
+    
+    IEnumerator GroundSlamAttack()
+    {
+        isAttacking = true;
+        
+        // Telegraph - crouch
+        Vector3 originalScale = transform.localScale;
+        transform.localScale = new Vector3(
+            originalScale.x, 
+            originalScale.y * 0.7f, 
+            originalScale.z
+        );
+        
+        yield return new WaitForSeconds(0.4f);
+        
+        // Jump up
+        transform.localScale = originalScale;
+        rb.linearVelocity = new Vector2(0, slamJumpHeight);
+        
+        yield return new WaitForSeconds(0.5f);
+        
+        // Force slam down
+        rb.linearVelocity = new Vector2(0, -slamJumpHeight * 1.5f);
+        
+        // Wait until boss hits ground
+        yield return new WaitUntil(() => Mathf.Abs(rb.linearVelocity.y) < 0.1f);
+        
+        // Impact effects
+        if (CameraShake.Instance != null)
+            CameraShake.Instance.Shake(0.3f, 0.2f);
+        
+        // Spawn shockwave visual
+        if (shockwaveEffect != null)
+        {
+            GameObject wave = Instantiate(shockwaveEffect, transform.position, Quaternion.identity);
+            Destroy(wave, 1f);
+        }
+        
+        // Damage grounded players in range
+        DamageGroundedPlayersInRange(shockwaveRange);
+        
+        rb.linearVelocity = Vector2.zero;
+        yield return new WaitForSeconds(0.5f);
+        
+        isAttacking = false;
+    }
 
+    IEnumerator ComboAttack_LungeSlamSwipe()
+    {
+        isAttacking = true;
+        
+        // Attack 1: Lunge
+        yield return StartCoroutine(LungeAttack_Internal());
+        
+        yield return new WaitForSeconds(0.3f);
+        
+        // Attack 2: Ground Slam
+        yield return StartCoroutine(GroundSlamAttack_Internal());
+        
+        yield return new WaitForSeconds(0.2f);
+        
+        // Attack 3: Tail Swipe (if player is close enough)
+        if (playerTarget != null)
+        {
+            float distanceToPlayer = Vector2.Distance(transform.position, playerTarget.position);
+            if (distanceToPlayer < 5f)
+            {
+                yield return StartCoroutine(TailSwipe());
+            }
+        }
+        
+        isAttacking = false;
+    }
+
+    // Internal version of Lunge (doesn't manage isAttacking)
+    IEnumerator LungeAttack_Internal()
+    {
+        if (playerTarget == null) yield break;
+        
+        // Telegraph - crouch
+        Vector3 originalScale = transform.localScale;
+        transform.localScale = new Vector3(originalScale.x, originalScale.y * 0.8f, originalScale.z);
+        
+        yield return new WaitForSeconds(lungeTelegraphTime);
+        
+        // Execute lunge
+        Vector2 lungeDirection = (playerTarget.position - transform.position).normalized;
+        rb.linearVelocity = lungeDirection * lungeSpeed;
+        
+        // Restore scale
+        transform.localScale = originalScale;
+        
+        yield return new WaitForSeconds(lungeDuration);
+        
+        // Stop lunge
+        rb.linearVelocity = new Vector2(0, rb.linearVelocity.y);
+    }
+
+    // Internal version of Ground Slam (doesn't manage isAttacking)
+    IEnumerator GroundSlamAttack_Internal()
+    {
+        // Telegraph - crouch
+        Vector3 originalScale = transform.localScale;
+        transform.localScale = new Vector3(originalScale.x, originalScale.y * 0.7f, originalScale.z);
+        
+        yield return new WaitForSeconds(0.4f);
+        
+        // Jump up
+        transform.localScale = originalScale;
+        rb.linearVelocity = new Vector2(0, slamJumpHeight);
+        
+        yield return new WaitForSeconds(0.5f);
+        
+        // Force slam down
+        rb.linearVelocity = new Vector2(0, -slamJumpHeight * 1.5f);
+        
+        // Wait until boss hits ground
+        yield return new WaitUntil(() => Mathf.Abs(rb.linearVelocity.y) < 0.1f);
+        
+        // Impact effects
+        if (CameraShake.Instance != null)
+            CameraShake.Instance.Shake(0.3f, 0.2f);
+        
+        // Spawn shockwave visual
+        if (shockwaveEffect != null)
+        {
+            GameObject wave = Instantiate(shockwaveEffect, transform.position, Quaternion.identity);
+            Destroy(wave, 1f);
+        }
+        
+        // Damage grounded players
+        DamageGroundedPlayersInRange(shockwaveRange);
+        
+        rb.linearVelocity = Vector2.zero;
+        yield return new WaitForSeconds(0.3f);
+    }
+    
+    IEnumerator RoarAttack()
+    {
+        isAttacking = true;
+        
+        // Visual buildup
+        if (spriteRenderer != null)
+        {
+            StartCoroutine(FlashColor(Color.yellow, 0.5f));
+        }
+        
+        yield return new WaitForSeconds(0.5f);
+        
+        // Roar effect
+        if (CameraShake.Instance != null)
+            CameraShake.Instance.Shake(0.5f, 0.15f);
+        
+        // Check if player is in range and not blocking
+        float distanceToPlayer = Vector2.Distance(transform.position, playerTarget.position);
+        if (distanceToPlayer <= roarStunRange)
+        {
+            Health playerHealth = GetPlayerHealth();
+            
+            if (playerHealth != null && !playerHealth.isBlocking)
+            {
+                StartCoroutine(StunPlayer(roarStunDuration));
+            }
+        }
+        
+        yield return new WaitForSeconds(1f);
+        isAttacking = false;
+    }
+    
+    IEnumerator PredictiveShot()
+    {
+        isAttacking = true;
+        
+        // Calculate prediction
+        Vector2 targetPos = PredictPlayerPosition();
+        Vector2 aimDirection = (targetPos - (Vector2)transform.position).normalized;
+        
+        // Telegraph - flash cyan
+        if (spriteRenderer != null)
+        {
+            spriteRenderer.color = Color.cyan;
+            yield return new WaitForSeconds(0.3f);
+            spriteRenderer.color = originalColor;
+        }
+        
+        // Fire projectile
+        FirePredictiveProjectile(aimDirection);
+        
+        yield return new WaitForSeconds(0.5f);
+        isAttacking = false;
+    }
+    
+    IEnumerator VerticalRainAttack()
+    {
+        isAttacking = true;
+
+        // Jump up
+        rb.linearVelocity = new Vector2(0, jumpForce);
+        yield return new WaitForSeconds(0.5f);
+
+        // Hover in air
+        float defaultGravity = rb.gravityScale;
+        rb.gravityScale = 0;
+        rb.linearVelocity = Vector2.zero;
+
+        // Spawn rain projectiles
+        int rainCount = Random.Range(minRainCount, maxRainCount);
+        float startX = playerTarget.position.x - (rainSpread / 2f);
+        float gap = rainSpread / (rainCount - 1);
+
+        for (int i = 0; i < rainCount; i++)
+        {
+            float xPos = startX + (i * gap) + Random.Range(-0.5f, 0.5f);
+            Vector2 spawnPos = new Vector2(xPos, transform.position.y + rainSpawnHeight);
+
+            SpawnVerticalProjectile(spawnPos);
+            
+            yield return new WaitForSeconds(0.05f);
+        }
+
+        yield return new WaitForSeconds(1f);
+
+        // Land
+        rb.gravityScale = defaultGravity;
+        yield return new WaitForSeconds(0.5f);
+
+        isAttacking = false;
+    }
+
+    IEnumerator CircularProjectileAttack()
+    {
+        isAttacking = true;
+
+        // Jump and hover
+        rb.linearVelocity = new Vector2(0, jumpForce);
+        yield return new WaitForSeconds(0.5f);
+
+        float defaultGravity = rb.gravityScale;
+        rb.gravityScale = 0;
+        rb.linearVelocity = Vector2.zero;
+
+        // Determine projectile count based on phase
+        int projCount = currentPhase == 2 ? phase2CircularCount : phase3CircularCount;
+        GameObject[] chargedProjs = new GameObject[projCount];
+        
+        // PHASE 1: Spawn projectiles in circle around boss
+        for (int i = 0; i < projCount; i++)
+        {
+            float angle = (360f / projCount) * i;
+            Vector2 offset = new Vector2(
+                Mathf.Cos(angle * Mathf.Deg2Rad),
+                Mathf.Sin(angle * Mathf.Deg2Rad)
+            ) * circularOrbitRadius;
+            
+            Vector2 spawnPos = (Vector2)transform.position + offset;
+            chargedProjs[i] = Instantiate(projectilePrefab, spawnPos, Quaternion.identity);
+            
+            // Stop movement while charging
+            Rigidbody2D projRb = chargedProjs[i].GetComponent<Rigidbody2D>();
+            if (projRb != null)
+            {
+                projRb.linearVelocity = Vector2.zero;
+                projRb.gravityScale = 0; // Don't fall while orbiting
+            }
+            
+            // Visual charge effect (yellow glow)
+            SpriteRenderer projSprite = chargedProjs[i].GetComponent<SpriteRenderer>();
+            if (projSprite != null)
+            {
+                projSprite.color = Color.yellow;
+            }
+            
+            yield return new WaitForSeconds(0.1f);
+        }
+        
+        // PHASE 2: Orbit around boss for telegraph
+        float elapsed = 0f;
+        
+        while (elapsed < circularOrbitDuration)
+        {
+            for (int i = 0; i < chargedProjs.Length; i++)
+            {
+                if (chargedProjs[i] != null)
+                {
+                    float angle = ((360f / projCount) * i) + (circularOrbitSpeed * elapsed);
+                    Vector2 offset = new Vector2(
+                        Mathf.Cos(angle * Mathf.Deg2Rad),
+                        Mathf.Sin(angle * Mathf.Deg2Rad)
+                    ) * circularOrbitRadius;
+                    
+                    chargedProjs[i].transform.position = (Vector2)transform.position + offset;
+                }
+            }
+            
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+        
+        // PHASE 3: Fire all projectiles at once
+        for (int i = 0; i < chargedProjs.Length; i++)
+        {
+            if (chargedProjs[i] != null)
+            {
+                // Direction = away from boss
+                Vector2 direction = (chargedProjs[i].transform.position - transform.position).normalized;
+                
+                Rigidbody2D projRb = chargedProjs[i].GetComponent<Rigidbody2D>();
+                if (projRb != null)
+                {
+                    projRb.gravityScale = 1; // Re-enable gravity
+                    projRb.linearVelocity = direction * projectileSpeed;
+                }
+                
+                // Change color back to normal
+                SpriteRenderer projSprite = chargedProjs[i].GetComponent<SpriteRenderer>();
+                if (projSprite != null)
+                {
+                    projSprite.color = Color.white;
+                }
+            }
+        }
+        
+        yield return new WaitForSeconds(0.5f);
+        
+        // Land
+        rb.gravityScale = defaultGravity;
+        yield return new WaitForSeconds(0.5f);
+
+        isAttacking = false;
+    }
+    
     IEnumerator ChargeAttack()
     {
-        isCharging = true;
+        isAttacking = true;
         
-        // Brief pause before charge
+        // Brief pause
         rb.linearVelocity = Vector2.zero;
         yield return new WaitForSeconds(0.3f);
         
@@ -170,117 +809,172 @@ public class BossController : MonoBehaviour
         
         // Stop charge
         rb.linearVelocity = new Vector2(0, rb.linearVelocity.y);
-        isCharging = false;
+        isAttacking = false;
     }
-
-    IEnumerator ProjectileAttack()
-        {
-            isCharging = true; // Lock the boss state
-
-            // 1. JUMP UP
-            rb.linearVelocity = new Vector2(0, jumpForce);
-            
-            // Wait a bit to reach the peak of the jump (0.5 seconds)
-            yield return new WaitForSeconds(0.5f); 
-
-            // 2. HOVER (Freeze in air)
-            float defaultGravity = rb.gravityScale; // Remember normal gravity
-            rb.gravityScale = 0; // Turn off gravity
-            rb.linearVelocity = Vector2.zero; // Stop moving completely
-
-            // 3. SHOOT (Your existing logic)
-            int projectileCount = currentPhase == 1 ? 1 : multiProjectileCount;
-            
-            if (projectileCount == 1)
-            {
-                FireProjectile(0);
-            }
-            else
-            {
-                float startAngle = -projectileSpreadAngle / 2;
-                float angleStep = projectileSpreadAngle / (projectileCount - 1);
-                
-                for (int i = 0; i < projectileCount; i++)
-                {
-                    float angle = startAngle + (angleStep * i);
-                    FireProjectile(angle);
-                    yield return new WaitForSeconds(0.1f); // Gap between shots
-                }
-            }
-            
-            // Recovery time while still in air
-            yield return new WaitForSeconds(0.5f);
-            
-            // 4. LAND (Drop down)
-            rb.gravityScale = defaultGravity; // Restore gravity
-            
-            // Wait for him to hit the ground (approximate) before attacking again
-            yield return new WaitForSeconds(0.5f); 
-
-            isCharging = false; // Unlock state
-        }
-
-
-    IEnumerator FreezePlayer(float duration)
-    {
-        IsPlayerFrozen = true;
-        
-        // Disable player input
-        PlayerController player = FindFirstObjectByType<PlayerController>();
-        if (player != null) 
-        {
-            player.enabled = false;
-        }
-        
-        yield return new WaitForSeconds(duration);
-        
-        if (player != null) 
-        {
-            player.enabled = true;
-        }
-        
-        IsPlayerFrozen = false;
-    }
-
-
-    void FireProjectile(float angleOffset)
+    
+    #endregion
+    
+    #region Projectile Spawning
+    
+    void SpawnVerticalProjectile(Vector2 position)
     {
         if (projectilePrefab == null) return;
         
-        Vector2 direction = (playerTarget.position - transform.position).normalized;
+        GameObject proj = Instantiate(projectilePrefab, position, Quaternion.Euler(0, 0, -90));
         
-        // Apply angle offset
-        float baseAngle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
-        float finalAngle = baseAngle + angleOffset;
-        
-        Vector2 finalDirection = new Vector2(
-            Mathf.Cos(finalAngle * Mathf.Deg2Rad),
-            Mathf.Sin(finalAngle * Mathf.Deg2Rad)
-        );
-        
-        GameObject projectile = Instantiate(projectilePrefab, projectileSpawnPoint.position, Quaternion.identity);
-        Rigidbody2D projRb = projectile.GetComponent<Rigidbody2D>();
-        
+        Rigidbody2D projRb = proj.GetComponent<Rigidbody2D>();
         if (projRb != null)
         {
-            projRb.linearVelocity = finalDirection * projectileSpeed;
+            projRb.linearVelocity = Vector2.down * projectileSpeed;
+        }
+        
+        ProjectileProperties props = proj.GetComponent<ProjectileProperties>();
+        if (props == null) props = proj.AddComponent<ProjectileProperties>();
+        props.isBlockable = true;
+        props.isVertical = true;
+        
+        // Visual tint
+        SpriteRenderer projSprite = proj.GetComponent<SpriteRenderer>();
+        if (projSprite != null)
+        {
+            projSprite.color = new Color(1f, 0.5f, 0.5f);
         }
     }
-
+    
+    void FirePredictiveProjectile(Vector2 direction)
+    {
+        if (projectilePrefab == null || projectileSpawnPoint == null) return;
+        
+        GameObject proj = Instantiate(
+            projectilePrefab, 
+            projectileSpawnPoint.position, 
+            Quaternion.identity
+        );
+        
+        Rigidbody2D projRb = proj.GetComponent<Rigidbody2D>();
+        if (projRb != null)
+        {
+            projRb.linearVelocity = direction * predictiveProjectileSpeed;
+        }
+        
+        SpriteRenderer projSprite = proj.GetComponent<SpriteRenderer>();
+        if (projSprite != null)
+        {
+            projSprite.color = Color.cyan;
+        }
+    }
+    
+    #endregion
+    
+    #region Utility Functions
+    
+    Vector2 PredictPlayerPosition()
+    {
+        Vector2 targetPos = playerTarget.position;
+        
+        Rigidbody2D playerRb = playerTarget.GetComponent<Rigidbody2D>();
+        if (playerRb == null) 
+            playerRb = playerTarget.GetComponentInParent<Rigidbody2D>();
+        
+        if (playerRb != null)
+        {
+            targetPos += playerRb.linearVelocity * predictionTime;
+        }
+        
+        return targetPos;
+    }
+    
+    void DamageGroundedPlayersInRange(float range)
+    {
+        if (playerTarget == null) return;
+        
+        float distanceToPlayer = Vector2.Distance(transform.position, playerTarget.position);
+        
+        if (distanceToPlayer <= range)
+        {
+            PlayerController player = FindFirstObjectByType<PlayerController>();
+            if (player == null) return;
+            
+            Rigidbody2D playerRb = player.GetComponent<Rigidbody2D>();
+            
+            // Check if player is on ground
+            if (playerRb != null && Mathf.Abs(playerRb.linearVelocity.y) < 0.5f)
+            {
+                Health playerHealth = player.GetComponent<Health>();
+                if (playerHealth != null)
+                {
+                    playerHealth.TakeDamage(1);
+                    if (HitStop.Instance != null) 
+                        HitStop.Instance.Stop(0.1f);
+                }
+            }
+        }
+    }
+    
+    void DamagePlayer(GameObject playerObj, int damage)
+    {
+        Health playerHealth = playerObj.GetComponent<Health>();
+        if (playerHealth == null)
+            playerHealth = playerObj.GetComponentInParent<Health>();
+        
+        if (playerHealth != null)
+        {
+            playerHealth.TakeDamage(damage);
+        }
+    }
+    
+    void ApplyKnockback(GameObject playerObj, float force)
+    {
+        Rigidbody2D playerRb = playerObj.GetComponent<Rigidbody2D>();
+        if (playerRb == null)
+            playerRb = playerObj.GetComponentInParent<Rigidbody2D>();
+        
+        if (playerRb != null)
+        {
+            Vector2 knockbackDir = (playerObj.transform.position - transform.position).normalized;
+            playerRb.linearVelocity = knockbackDir * force;
+        }
+    }
+    
+    Health GetPlayerHealth()
+    {
+        if (playerTarget == null) return null;
+        
+        Health health = playerTarget.GetComponent<Health>();
+        if (health == null)
+            health = playerTarget.GetComponentInParent<Health>();
+        
+        return health;
+    }
+    
+    void DealContactDamage(GameObject playerObj)
+    {
+        Health playerHealth = playerObj.GetComponentInParent<Health>();
+        if (playerHealth != null)
+        {
+            playerHealth.TakeDamage(1);
+            if (HitStop.Instance != null) 
+                HitStop.Instance.Stop(0.1f);
+        }
+    }
+    
+    #endregion
+    
+    #region Dodge & Defensive
+    
     public void TryDodge()
     {
-        if (Time.time >= nextDodgeTime && !isCharging && !isDodging)
+        if (Time.time >= nextDodgeTime && !isAttacking && !isDodging)
         {
             StartCoroutine(DodgeBack());
             nextDodgeTime = Time.time + dodgeCooldown;
         }
     }
-
+    
     IEnumerator DodgeBack()
     {
         isDodging = true;
         
-        // Dodge away from player
         Vector2 dodgeDirection = (transform.position - playerTarget.position).normalized;
         rb.linearVelocity = dodgeDirection * dodgeSpeed;
         
@@ -289,9 +983,121 @@ public class BossController : MonoBehaviour
         rb.linearVelocity = new Vector2(0, rb.linearVelocity.y);
         isDodging = false;
     }
-
+    
+    public void OnDamageTaken()
+    {
+        if (isInvulnerable) return;
+        
+        if (Random.value < 0.3f)
+        {
+            TryDodge();
+        }
+    }
+    
+    #endregion
+    
+    #region Player Control
+    
+    IEnumerator FreezePlayer(float duration)
+    {
+        IsPlayerFrozen = true;
+        
+        PlayerController player = FindFirstObjectByType<PlayerController>();
+        if (player != null)
+        {
+            player.enabled = false;
+        }
+        
+        yield return new WaitForSeconds(duration);
+        
+        if (player != null)
+        {
+            player.enabled = true;
+        }
+        
+        IsPlayerFrozen = false;
+    }
+    
+    IEnumerator StunPlayer(float duration)
+    {
+        IsPlayerFrozen = true;
+        
+        PlayerController player = FindFirstObjectByType<PlayerController>();
+        if (player == null) yield break;
+        
+        player.enabled = false;
+        
+        // Visual indicator
+        SpriteRenderer[] sprites = player.GetComponentsInChildren<SpriteRenderer>();
+        float elapsed = 0f;
+        
+        while (elapsed < duration)
+        {
+            foreach (SpriteRenderer sr in sprites)
+            {
+                if (sr != null) sr.color = Color.yellow;
+            }
+            yield return new WaitForSeconds(0.1f);
+            
+            foreach (SpriteRenderer sr in sprites)
+            {
+                if (sr != null) sr.color = Color.white;
+            }
+            yield return new WaitForSeconds(0.1f);
+            
+            elapsed += 0.2f;
+        }
+        
+        // Restore
+        foreach (SpriteRenderer sr in sprites)
+        {
+            if (sr != null) sr.color = Color.white;
+        }
+        
+        player.enabled = true;
+        IsPlayerFrozen = false;
+    }
+    
+    #endregion
+    
+    #region Phase Management
+    
+    void CheckAggro()
+    {
+        GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+        if (playerObj == null) return;
+        
+        float distance = Vector2.Distance(transform.position, playerObj.transform.position);
+        if (distance <= aggroRange)
+        {
+            StartCoroutine(InitialTransformation());
+        }
+    }
+    
+    IEnumerator InitialTransformation()
+    {
+        hasAggro = true;
+        isTransitioning = true;
+        
+        StartCoroutine(FreezePlayer(transformationDuration));
+        
+        if (CameraShake.Instance != null)
+            CameraShake.Instance.Shake(transformationDuration, 0.2f);
+        
+        StartCoroutine(FlashColor(Color.yellow, transformationDuration));
+        
+        yield return new WaitForSeconds(transformationDuration);
+        
+        if (musicManager != null)
+            musicManager.PlayPhaseMusic(1);
+        
+        isTransitioning = false;
+    }
+    
     void CheckPhaseTransition()
     {
+        if (bossHealth == null) return;
+        
         float healthPercent = (float)bossHealth.currentHealth / maxHealth;
         
         if (currentPhase == 1 && healthPercent <= phase2HealthPercent)
@@ -303,7 +1109,7 @@ public class BossController : MonoBehaviour
             StartCoroutine(TransitionToPhase(3));
         }
     }
-
+    
     IEnumerator TransitionToPhase(int newPhase)
     {
         isTransitioning = true;
@@ -311,50 +1117,38 @@ public class BossController : MonoBehaviour
         
         rb.linearVelocity = Vector2.zero;
         
-        // Freeze player during transition
         StartCoroutine(FreezePlayer(roarDuration + 1f));
         
-        // Camera shake effect
         if (CameraShake.Instance != null)
-        {
             CameraShake.Instance.Shake(roarDuration, 0.3f);
-        }
-        // Fade out music
+        
         if (musicManager != null)
-        {
             musicManager.FadeOutMusic();
-        }
         
         yield return new WaitForSeconds(1f);
         
-        // Roar/Dialogue
         if (roarEffect != null)
         {
             GameObject roar = Instantiate(roarEffect, transform.position, Quaternion.identity);
             Destroy(roar, roarDuration);
         }
         
-        // Visual effect - flash color
         StartCoroutine(FlashColor(Color.red, roarDuration));
         
         yield return new WaitForSeconds(roarDuration);
         
-        // Update phase
         currentPhase = newPhase;
         UpdatePhaseStats();
         
-        // Resume music with new phase
         if (musicManager != null)
-        {
             musicManager.ResumePhaseMusic(currentPhase);
-        }
         
         yield return new WaitForSeconds(invulnerabilityDuration);
         
         isInvulnerable = false;
         isTransitioning = false;
     }
-
+    
     void UpdatePhaseStats()
     {
         switch (currentPhase)
@@ -375,7 +1169,11 @@ public class BossController : MonoBehaviour
                 break;
         }
     }
-
+    
+    #endregion
+    
+    #region Visual Effects
+    
     IEnumerator FlashColor(Color flashColor, float duration)
     {
         if (spriteRenderer == null) yield break;
@@ -393,75 +1191,15 @@ public class BossController : MonoBehaviour
         
         spriteRenderer.color = originalColor;
     }
-
-    void OnCollisionStay2D(Collision2D collision)
-    {
-        if (collision.gameObject.CompareTag("Player"))
-        {
-            // Try to dodge when player gets too close
-            TryDodge();
-            
-            // Deal contact damage
-            Health playerHealth = collision.gameObject.GetComponentInParent<Health>();
-            if (playerHealth != null)
-            {
-                playerHealth.TakeDamage(1);
-                // Add a slightly longer freeze for player getting hurt
-                if (HitStop.Instance != null) HitStop.Instance.Stop(0.1f);  
-            }
-        }
-    }
-
-    // Called by Health script when taking damage
-    public void OnDamageTaken()
-    {
-        if (isInvulnerable) return;
-        
-        // Chance to dodge after being hit
-        if (Random.value < 0.3f) // 30% chance
-        {
-            TryDodge();
-        }
-    }
-
+    
+    #endregion
+    
+    #region Public Interface
+    
     public bool CanTakeDamage()
     {
         return !isInvulnerable && !isTransitioning;
     }
-
-    void CheckAggro()
-    {
-        GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
-        if (playerObj != null)
-        {
-            float distance = Vector2.Distance(transform.position, playerObj.transform.position);
-            if (distance <= aggroRange)
-            {
-                StartCoroutine(InitialTransformation());
-            }
-        }
-    }
-
-    IEnumerator InitialTransformation()
-    {
-        hasAggro = true;
-        isTransitioning = true; // <--- LOCK BOSS LOGIC
-
-        // Freeze player during transformation
-        StartCoroutine(FreezePlayer(transformationDuration));
-        
-        // Camera shake
-        if (CameraShake.Instance != null)
-            CameraShake.Instance.Shake(transformationDuration, 0.2f);
-        
-        // Visual effect (flash yellow during transformation)
-        StartCoroutine(FlashColor(Color.yellow, transformationDuration));
-        
-        yield return new WaitForSeconds(transformationDuration);
-        
-        isTransitioning = false; // <--- UNLOCK BOSS LOGIC
-        // Start phase 1 music
-        if (musicManager != null)
-            musicManager.PlayPhaseMusic(1);
-    }
+    
+    #endregion
 }

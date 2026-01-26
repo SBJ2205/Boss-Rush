@@ -33,8 +33,7 @@ public class BossMusicManager : MonoBehaviour
         
         originalVolume = musicSource.volume;
         
-        // Start with Phase 1 music
-        PlayPhaseMusic(1);
+        
     }
 
     void Update()
